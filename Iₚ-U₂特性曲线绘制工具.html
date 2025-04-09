@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iₚ-U₂特性曲线绘制工具</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+    <style>
+        body {
+            font-family: "Arial", sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+            background-color: white;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            background-color: white;
+        }
+        .upload-section {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        #chart-wrapper {
+            width: 100%;
+            margin-top: 20px;
+            background-color: white;
+            padding: 10px;
+            border: 1px solid #eee;
+            display: inline-block;
+        }
+        #chart-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        #myChart {
+            background-color: white !important;
+        }
+        button {
+            background-color: #4285f4;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        .instructions {
+            background-color: #f0f7ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4285f4;
+        }
+        .file-name {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        .settings {
+            background-color: #fff8e1;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .control-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        #exportBtn {
+            background-color: #34a853;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Iₚ-U₂特性曲线绘制工具</h1>
+        
+        <div class="instructions">
+            <h3>使用说明：</h3>
+            <ol>
+                <li>准备Excel文件，必须包含两列数据：<strong>U_(2)</strong>和<strong>I_(p)</strong></li>
+                <li>点击下方按钮上传文件（支持.xlsx和.xls格式）</li>
+                <li>系统将自动绘制曲线并识别波峰点</li>
+                <li>调整图表尺寸后可以导出为PNG图片</li>
+            </ol>
+        </div>
+
+        <div class="settings">
+            <h3>图表设置：</h3>
+            <div class="control-group">
+                <div class="control-item">
+                    <label for="sensitivity">灵敏度：</label>
+                    <input type="range" id="sensitivity" min="0.1" max="0.9" step="0.1" value="0.5">
+                    <span id="sensitivityValue">0.5</span>
+                </div>
+                <div class="control-item">
+                    <label for="minDistance">最小波峰间距：</label>
+                    <input type="number" id="minDistance" min="1" max="20" value="5">
+                    <span>单位</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <div class="control-item">
+                    <label for="chartWidth">图表宽度：</label>
+                    <input type="number" id="chartWidth" min="5" max="30" value="15">
+                    <span>cm</span>
+                </div>
+                <div class="control-item">
+                    <label for="chartHeight">图表高度：</label>
+                    <input type="number" id="chartHeight" min="5" max="30" value="10">
+                    <span>cm</span>
+                </div>
+            </div>
+            
+            <div class="control-group">
+                <button onclick="updateChartSize()">应用图表尺寸</button>
+                <button id="exportBtn" onclick="exportChart()">导出图表(PNG)</button>
+            </div>
+        </div>
+
+        <div class="upload-section">
+            <input type="file" id="fileInput" accept=".xlsx, .xls" style="display: none;" />
+            <button onclick="document.getElementById('fileInput').click()">选择Excel文件</button>
+            <div class="file-name" id="fileName">未选择文件</div>
+            <button onclick="handleFile()" style="margin-top: 10px;">绘制曲线</button>
+        </div>
+
+        <div id="chart-wrapper">
+            <div id="chart-container">
+                <canvas id="myChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let myChart = null;
+        const fileInput = document.getElementById('fileInput');
+        const sensitivitySlider = document.getElementById('sensitivity');
+        const sensitivityValue = document.getElementById('sensitivityValue');
+        const minDistanceInput = document.getElementById('minDistance');
+        const chartWidthInput = document.getElementById('chartWidth');
+        const chartHeightInput = document.getElementById('chartHeight');
+        
+        // 更新灵敏度显示
+        sensitivitySlider.addEventListener('input', function() {
+            sensitivityValue.textContent = this.value;
+        });
+
+        fileInput.addEventListener('change', function(e) {
+            document.getElementById('fileName').textContent = e.target.files[0]?.name || '未选择文件';
+        });
+
+        // 更新图表尺寸
+        function updateChartSize() {
+            if (!myChart) return;
+            
+            const widthCm = parseFloat(chartWidthInput.value);
+            const heightCm = parseFloat(chartHeightInput.value);
+            
+            // 将cm转换为px (1cm ≈ 37.8px)
+            const widthPx = widthCm * 37.8;
+            const heightPx = heightCm * 37.8;
+            
+            // 更新canvas尺寸
+            const canvas = document.getElementById('myChart');
+            canvas.width = widthPx;
+            canvas.height = heightPx;
+            canvas.style.width = `${widthPx}px`;
+            canvas.style.height = `${heightPx}px`;
+            
+            // 更新Chart.js内部尺寸
+            myChart.resize();
+            myChart.update();
+        }
+
+        // 导出图表为PNG
+        function exportChart() {
+            if (!myChart) {
+                alert('请先绘制图表');
+                return;
+            }
+            
+            const canvas = document.getElementById('myChart');
+            
+            // 创建一个临时canvas用于导出
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            
+            // 设置临时canvas尺寸
+            tempCanvas.width = canvas.width;
+            tempCanvas.height = canvas.height;
+            
+            // 填充白色背景
+            tempCtx.fillStyle = 'white';
+            tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+            
+            // 绘制图表内容
+            tempCtx.drawImage(canvas, 0, 0);
+            
+            // 创建下载链接
+            const link = document.createElement('a');
+            link.download = 'Iₚ-U₂特性曲线.png';
+            link.href = tempCanvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function handleFile() {
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                alert('请先选择Excel文件');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    
+                    // 获取第一个工作表
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+                    
+                    // 提取U_(2)和I_(p)列（支持多种列名格式）
+                    const u2 = [];
+                    const ip = [];
+                    
+                    jsonData.forEach(row => {
+                        const u2Val = row['U_(2)'] ?? row['u2'] ?? row['U2'] ?? row['U₂'];
+                        const ipVal = row['I_(p)'] ?? row['ip'] ?? row['Ip'] ?? row['Iₚ'];
+                        
+                        if (u2Val !== undefined && ipVal !== undefined) {
+                            u2.push(Number(u2Val));
+                            ip.push(Number(ipVal));
+                        }
+                    });
+                    
+                    if (u2.length === 0 || ip.length === 0) {
+                        throw new Error('未找到U₂和Iₚ列数据，请检查Excel文件格式');
+                    }
+                    
+                    // 获取用户设置的参数
+                    const sensitivity = parseFloat(sensitivitySlider.value);
+                    const minDistance = parseFloat(minDistanceInput.value);
+                    
+                    // 改进的波峰检测算法
+                    const peaks = findPeaks(ip, u2, sensitivity, minDistance);
+                    
+                    // 绘制图表
+                    drawChart(u2, ip, peaks);
+                    
+                    // 应用初始尺寸
+                    updateChartSize();
+                } catch (error) {
+                    alert('处理文件时出错: ' + error.message);
+                    console.error(error);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // 优化的波峰识别算法
+        function findPeaks(yValues, xValues, sensitivity = 0.5, minPeakDistance = 5) {
+            const peaks = [];
+            const minPeakHeight = (Math.max(...yValues) - Math.min(...yValues)) * sensitivity * 0.1 + Math.min(...yValues);
+            
+            // 1. 平滑处理
+            const smoothed = [];
+            for (let i = 0; i < yValues.length; i++) {
+                const window = [
+                    yValues[Math.max(0, i-2)],
+                    yValues[Math.max(0, i-1)],
+                    yValues[i],
+                    yValues[Math.min(yValues.length-1, i+1)],
+                    yValues[Math.min(yValues.length-1, i+2)]
+                ];
+                smoothed.push(window.reduce((a,b) => a+b, 0) / window.length);
+            }
+
+            // 2. 寻找候选波峰
+            for (let i = 3; i < smoothed.length - 3; i++) {
+                // 基本波峰条件
+                if (smoothed[i] > minPeakHeight &&
+                    smoothed[i] > smoothed[i-1] && 
+                    smoothed[i] > smoothed[i+1] &&
+                    smoothed[i] > smoothed[i-2] &&
+                    smoothed[i] > smoothed[i+2]) {
+                    
+                    // 在原始数据中寻找精确峰值位置
+                    let peakIndex = i;
+                    for (let j = i-2; j <= i+2; j++) {
+                        if (yValues[j] > yValues[peakIndex]) {
+                            peakIndex = j;
+                        }
+                    }
+                    
+                    // 检查是否满足最小距离要求
+                    const isFarEnough = peaks.every(p => 
+                        Math.abs(xValues[peakIndex] - p.x) >= minPeakDistance
+                    );
+                    
+                    if (isFarEnough) {
+                        peaks.push({
+                            x: xValues[peakIndex],
+                            y: yValues[peakIndex],
+                            index: peakIndex
+                        });
+                    }
+                }
+            }
+
+            // 3. 按Y值排序
+            peaks.sort((a, b) => b.y - a.y);
+            
+            return peaks.sort((a, b) => a.x - b.x);
+        }
+
+        function drawChart(u2, ip, peaks) {
+            const ctx = document.getElementById('myChart').getContext('2d');
+            
+            // 如果已有图表，先销毁
+            if (myChart) {
+                myChart.destroy();
+            }
+            
+            // 配置Chart.js全局设置
+            Chart.defaults.font.family = "'Arial', sans-serif";
+            Chart.defaults.color = '#333';
+            Chart.defaults.backgroundColor = 'white';
+            
+            myChart = new Chart(ctx, {
+                type: 'scatter',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Iₚ-U₂曲线',
+                            data: u2.map((x, i) => ({x, y: ip[i]})),
+                            borderColor: 'rgba(0, 0, 0, 1)',
+                            backgroundColor: 'rgba(0, 0, 0, 1)',
+                            borderWidth: 1.2,
+                            pointRadius: 2.0,
+                            pointBackgroundColor: 'rgba(0, 0, 0, 1)',
+                            pointBorderColor: 'rgba(0, 0, 0, 1)',
+                            pointBorderWidth: 1,
+                            showLine: true,
+                            fill: false,
+                            tension: 0.1
+                        },
+                        {
+                            label: '波峰点',
+                            data: peaks.map(p => ({x: p.x, y: p.y})),
+                            backgroundColor: 'rgba(255, 59, 48, 0.8)',
+                            borderColor: 'rgba(0, 0, 0, 0.8)',
+                            borderWidth: 0.8,
+                            pointRadius: 6,
+                            pointHoverRadius: 8
+                        }
+                    ]
+                },
+                options: {
+                    responsive: false, // 必须设为false才能自定义尺寸
+                    maintainAspectRatio: false,
+                    backgroundColor: 'white',
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'U₂ (V)',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                },
+                                padding: {top: 10}
+                            },
+                            grid: {
+                                drawOnChartArea: true,
+                                color: 'rgba(0, 0, 0, 0.1)',
+                                lineWidth: 1
+                            },
+                            ticks: {
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Iₚ (×10⁻⁷ A)',
+                                font: {
+                                    size: 14,
+                                    weight: 'bold'
+                                },
+                                padding: {bottom: 10}
+                            },
+                            grid: {
+                                drawOnChartArea: true,
+                                color: 'rgba(0, 0, 0, 0.1)',
+                                lineWidth: 1
+                            },
+                            ticks: {
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                font: {
+                                    size: 12,
+                                    weight: 'bold'
+                                },
+                                padding: 20,
+                                usePointStyle: true,
+                                pointStyle: 'circle'
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `(${context.parsed.x.toFixed(1)} V, ${context.parsed.y.toFixed(3)} ×10⁻⁷ A)`;
+                                }
+                            },
+                            displayColors: false,
+                            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                            titleFont: {
+                                size: 12,
+                                weight: 'bold'
+                            },
+                            bodyFont: {
+                                size: 12
+                            },
+                            padding: 10
+                        },
+                        datalabels: {
+                            display: false
+                        }
+                    },
+                    elements: {
+                        line: {
+                            tension: 0
+                        }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+            
+            // 添加波峰标注（透明无边框）
+            peaks.forEach(peak => {
+                myChart.data.datasets.push({
+                    label: `波峰 (${peak.x.toFixed(1)}, ${peak.y.toFixed(3)})`,
+                    data: [{
+                        x: peak.x,
+                        y: peak.y
+                    }],
+                    pointRadius: 0,
+                    datalabels: {
+                        display: true,
+                        align: peak.x < Math.max(...u2)/2 ? 'right' : 'left',
+                        offset: peak.x < Math.max(...u2)/2 ? -15 : 15,
+                        backgroundColor: 'transparent',
+                        borderColor: 'transparent',
+                        borderRadius: 0,
+                        borderWidth: 0,
+                        color: '#d32f2f',
+                        font: {
+                            size: 11,
+                            weight: 'bold'
+                        },
+                        formatter: function(value) {
+                            return `(${value.x.toFixed(1)}, ${value.y.toFixed(3)})`;
+                        },
+                        padding: 0
+                    }
+                });
+            });
+            
+            myChart.update();
+        }
+    </script>
+</body>
+</html>
